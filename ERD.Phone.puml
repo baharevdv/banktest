@@ -1,0 +1,17 @@
+@startuml
+entity users {
+user_id : PK,
+--
+user_name : string
+}
+entity phones {
+user_id : FK-users,
+--
+phone : string,
+date_from : date,
+date_delete : date
+}
+
+users ||-o{ phones : users.user_id -> phones.user_id
+
+@enduml

@@ -1,0 +1,134 @@
+@startuml
+'https://plantuml.com/sequence-diagram
+
+autonumber "<b>Шаг 00:"
+skinparam maxMessageSize 200
+
+actor "Пользователь" as user
+
+box FRONT
+boundary "WEB/iOS/Android" as front
+end box
+
+box BACKEND #LightGreen
+participant "Платформа интернет банкинга" as platform
+participant "ESB" as esb
+participant "CRM\nмастер система по клиентам" as crm
+participant "Карточный процессинг\nмастер система по картам" as cards
+participant "CCS \nПродуктовая система кредитных карт" as css
+participant "АБС\nмастер система по договорам" as abs
+end box
+
+== Вход в личный кабинет ==
+user -> front: Ввод данных для входа в личный кабинет
+front -> platform: Запрос аутентификации
+note left
+<b> POST https://bankname.ru/oauth/login
+  -header 'content-type: application/x-www-form-urlencoded'
+  -data type=LOGIN
+  -data grant_type=password
+  -data client_id=Evo-UI
+  -data username={username} # логин от личного кабинета клиента
+  -data password={password} # пароль от личного кабинета клиента
+end note
+activate platform
+user <- front : Форма ввода кода подтверждения
+platform -> platform : Дешифровка
+platform -> platform : Проверка логина и пароля
+alt <font color=red> Ошибка аутентификации
+front <-[#red]- platform :  Ошибка аутентификации
+user <-[#red]- front : Не верные логин и пароль
+else Успешная аутентификация
+platform -> platform : Поиск телефона
+platform ->> user : SMS с кодом подтверждения
+front -> platform: Запрос авторизации
+note left
+<b> POST https://bankname.ru/oauth/token
+  -header 'content-type: application/x-www-form-urlencoded'
+  -data type=LOGIN
+  -data grant_type=password
+  -data client_id=Evo-UI
+  -data username={username} # логин от личного кабинета клиента
+  -data password={password} # пароль от личного кабинета клиента
+  -data 2fa_confirmation={2fa_confirmation_code} # код двухфакторной авторизации
+end note
+platform -> platform : Дешифровка
+platform -> platform : Проверка
+alt <font color=red> Ошибка авторизации
+front <-[#red]- platform :  Ошибка авторизации
+user <-[#red]- front : Не верные логин и пароль
+else Успешная авторизация
+front <-- platform : Токен для доступа в ЛК
+note right
+{
+  "access_token": "eyJhbGciOiJIUzI1Ni...",
+  "token_type": "bearer",
+  "refresh_token": "eyJhbGciOiJIUzI1Ni...",
+  "expires_in": 1799,
+  "scope": "read write purchase",
+  "X-Fingerprint": "29798b7854277c53f3fbab4efe8afbdf",
+  "x_user_id": "f0b40dab-28a3-449c-896d-1c8b594a5662",
+  "x_uid": null,
+  "iat": 1597320746126,
+  "x_longlived": false,
+  "jti": "92a0aa4e-36b3-48bd-adfc-4d9139519a3f"
+}
+end note
+front -> platform : Запрос данных для ЛК клиента
+note left
+<b> GET /platform/lk/{id}
+  -header 'access_token: "eyJhbGciOiJIUzI1Ni...',
+end note
+
+platform -> crm : Запрос данных по клиенту для отображения в ЛК
+note left
+<b> GET /crm/client/{id}
+end note
+activate crm
+crm -> crm : Бодбор информации для отбражения ЛК клиента
+crm --> platform : Информация для отбражения ЛК клиента
+
+deactivate crm
+'esb -->> platform : Уведомления и предложения
+platform --> front : ЛК клиента
+front ->> platform : Запрос данных для наполнения ЛК клиента
+note left
+<b> GET /platform/lk/{id}/metadata
+  -header 'access_token: "eyJhbGciOiJIUzI1Ni...',
+end note
+platform ->> esb : Сообщение о входе пользователя в ЛК
+activate esb
+
+user <-- front : ЛК пользователя
+'css ->> esb : Четние событий
+cards <<- esb : Cобытие входа в систему
+activate cards
+cards -> cards : Информация о действующих картах клиента
+cards -->> esb : Информация о действующих картах клиента
+deactivate cards
+esb -->> platform : Данные о действующих картах
+platform -->> front : Обновление блока действующих карт ЛК
+
+css <<- esb : Cобытие входа в систему
+activate css
+css -> css : Информация об открытых кредитных картах клиента
+css -->> esb : Информация об открытых кредитных картах клиента
+deactivate css
+esb -->> platform : Данные об открытых кредитных картах
+platform -->> front : Обновление блока кредитных карт ЛК
+
+abs <<- esb : Cобытие входа в систему
+activate abs
+abs -> abs : Информация о договорах клиента
+abs -->> esb : Информация о договорах клиента
+deactivate abs
+esb -->> platform : Данные о договорах
+deactivate esb
+platform -->> front : Обновление блока договоров
+deactivate platform
+user <<-- front : Обновление интерфейса ЛК
+end
+end
+== выдачи кредитной карты ==
+
+@enduml
